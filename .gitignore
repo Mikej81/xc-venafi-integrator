@@ -19,3 +19,10 @@
 
 # Go workspace file
 go.work
+
+prep_env.sh
+
+*.pem
+*.key
+*.crt
+*.cer
