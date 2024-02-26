@@ -26,3 +26,5 @@ prep_env.sh
 *.key
 *.crt
 *.cer
+
+my*.*

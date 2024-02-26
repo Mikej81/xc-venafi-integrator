@@ -6,6 +6,17 @@ Solution to integrate Venafi CA into XC via vesctl / blindfold.
 
 To run this application, you need to set the following environment variables:
 
+### Obtaining API Credentials from XC Console
+
+P12 file can be downloaded from XC console.
+
+* Log in to XC console
+* Click Account in upper right, and select settings.
+* Under Personal Management, Select My Credentials
+* Create credentials by click Add, and selecting type API certificate
+* Set Name, Password, and Expiration date.
+* Click Download.
+
 ### Venafi TLS Cloud Configs
 
 * VEN_API_URL: The URL to the Venafi API endpoint.

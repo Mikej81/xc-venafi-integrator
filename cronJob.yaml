@@ -1,0 +1,26 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: venafi-integrator-cron
+spec:
+  schedule: "0 2 * * 0" # Runs every Sunday at 0200.
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: integrator-container
+              image: image:latest
+              volumeMounts:
+                - name: config-volume
+                  mountPath: /gouser
+                - name: data-volume # Mounting the PVC
+                  mountPath: /certs # Adjust this path as needed
+          volumes:
+            - name: config-volume
+              configMap:
+                name: venafi-integrator-config
+            - name: data-volume
+              persistentVolumeClaim:
+                claimName: venafi-cert-pvc # This should match the name of your PVC
+          restartPolicy: OnFailure

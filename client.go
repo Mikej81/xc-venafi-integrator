@@ -91,7 +91,7 @@ func generateCSR(commonName string) (csrPEM string, err error) {
 	csrPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes}))
 
 	// Create directories named after the commonName
-	dir := filepath.Join(".", commonName) // Adjust path as needed
+	dir := filepath.Join("/certs/", commonName) // Adjust path as needed
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		fmt.Println("error creating directory: %v", err)
 		return "", err
@@ -252,7 +252,7 @@ func main() {
 	// Cert Values
 	commonName := os.Getenv("VEN_COMMON_NAME")
 
-	dir := filepath.Join(".", commonName) // Adjust path as needed
+	dir := filepath.Join("/certs/", commonName) // Adjust path as needed
 
 	certPath := filepath.Join(dir, "/certs/", commonName+".pem")
 	keyPath := filepath.Join(dir, "/key/", "private.key")

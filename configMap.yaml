@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: venafi-integrator-config
+data:
+  .vesconfig: |
+    server-urls: https://acmecorp.console.ves.volterra.io/api
+    p12-bundle: /gouser/p12-bundle.p12
+  p12-bundle.p12: |
+    <p12-bundle.p12-content>
