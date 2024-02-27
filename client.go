@@ -48,7 +48,6 @@ type CSRResponse struct {
 	}
 }
 
-// Adjusted struct definitions to include a boolean `disable` field
 type SecretInfo struct {
 	Location string `json:"location"`
 }
@@ -238,7 +237,11 @@ func downloadCertificate(certURL, filePath, apiKey string) error {
 
 func renewCertificate(apiURL, apiKey, certPath, keyPath string) error {
 	// Implement the logic to renew the certificate.
-
+	//
+	//
+	//
+	//
+	//
 	return nil
 }
 
@@ -290,7 +293,7 @@ func encodeFileToBase64(filePath string) (string, error) {
 	return base64.StdEncoding.EncodeToString([]byte(contentStr)), nil
 }
 
-// Function to read file content, optionally remove a specified prefix, and clean it
+// Function to read file content and clean it
 func readFileAndClean(filePath string) (string, error) {
 	fileContent, err := os.ReadFile(filePath)
 	if err != nil {

@@ -37,6 +37,5 @@ P12 file can be downloaded from XC console.
 ## To Do
 
 * Add Cert Renewal function
-* Add VesCTL function to upload key pair
 * Build dockerfile and Container Image
 * Add example config-map for container (certs for vesctl)
