@@ -122,15 +122,15 @@ func generateCSR(commonName string) (csrPEM string, err error) {
 	// Create directories named after the commonName
 	dir := filepath.Join("./certs/", commonName) // Adjust path as needed
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		fmt.Println("error creating directory: %v", err)
+		fmt.Printf("error creating directory: %v\n", err)
 		return "", err
 	}
 	if err := os.MkdirAll(dir+"/certs", 0755); err != nil {
-		fmt.Println("error creating directory: %v", err)
+		fmt.Printf("error creating directory: %v\n", err)
 		return "", err
 	}
 	if err := os.MkdirAll(dir+"/key", 0755); err != nil {
-		fmt.Println("error creating directory: %v", err)
+		fmt.Printf("error creating directory: %v\n", err)
 		return "", err
 	}
 
@@ -437,7 +437,7 @@ func main() {
 		fmt.Println("Certificate or key file does not exist. Generating...")
 		csr, err := generateCSR(commonName)
 		if err != nil {
-			fmt.Println("Failed to generate CSR: %v\n", err)
+			fmt.Printf("Failed to generate CSR: %v\n", err)
 			return
 		}
 
