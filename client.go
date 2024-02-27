@@ -7,13 +7,16 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -43,6 +46,32 @@ type CSRResponse struct {
 		SubjectAlternativeNamesByType map[string][]string `json:"subjectAlternativeNamesByType"`
 		ValidityPeriod                string              `json:"validityPeriod"`
 	}
+}
+
+// Adjusted struct definitions to include a boolean `disable` field
+type SecretInfo struct {
+	Location string `json:"location"`
+}
+
+type PrivateKey struct {
+	BlindfoldSecretInfo SecretInfo `json:"blindfold_secret_info"`
+}
+
+type Spec struct {
+	CertificateURL      string          `json:"certificate_url"`
+	PrivateKey          PrivateKey      `json:"private_key"`
+	DisableOcspStapling json.RawMessage `json:"disable_ocsp_stapling"`
+}
+
+type Metadata struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Disable   bool   `json:"disable"` // Changed to bool
+}
+
+type CertInfo struct {
+	Metadata Metadata `json:"metadata"`
+	Spec     Spec     `json:"spec"`
 }
 
 // Function to generate a CSR and write the private key to disk
@@ -91,7 +120,7 @@ func generateCSR(commonName string) (csrPEM string, err error) {
 	csrPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes}))
 
 	// Create directories named after the commonName
-	dir := filepath.Join("/certs/", commonName) // Adjust path as needed
+	dir := filepath.Join("./certs/", commonName) // Adjust path as needed
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		fmt.Println("error creating directory: %v", err)
 		return "", err
@@ -193,13 +222,13 @@ func downloadCertificate(certURL, filePath, apiKey string) error {
 	}
 
 	// Read the response body
-	certData, err := ioutil.ReadAll(resp.Body)
+	certData, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("error reading response body: %v", err)
 	}
 
 	// Save the certificate data to a file
-	if err := ioutil.WriteFile(filePath, certData, 0644); err != nil {
+	if err := os.WriteFile(filePath, certData, 0644); err != nil {
 		return fmt.Errorf("error writing certificate to file: %v", err)
 	}
 
@@ -214,7 +243,7 @@ func renewCertificate(apiURL, apiKey, certPath, keyPath string) error {
 }
 
 func certExpiresSoon(certPath string) (bool, error) {
-	certPEM, err := ioutil.ReadFile(certPath)
+	certPEM, err := os.ReadFile(certPath)
 	if err != nil {
 		return false, err
 	}
@@ -240,6 +269,115 @@ func fileExists(filePath string) bool {
 	return !os.IsNotExist(err)
 }
 
+// Function to clean the commonName
+func cleanCommonName(commonName string) string {
+	// Remove all special characters and replace periods with hyphens
+	re := regexp.MustCompile(`[^a-zA-Z0-9]+`)
+	cleanName := re.ReplaceAllString(commonName, "-")
+	cleanName = strings.Trim(cleanName, "-")
+	return cleanName
+}
+
+// Function to read file and encode its content to Base64
+func encodeFileToBase64(filePath string) (string, error) {
+	fileContent, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("error reading file %s: %v", filePath, err)
+	}
+
+	contentStr := string(fileContent)
+
+	return base64.StdEncoding.EncodeToString([]byte(contentStr)), nil
+}
+
+// Function to read file content, optionally remove a specified prefix, and clean it
+func readFileAndClean(filePath string) (string, error) {
+	fileContent, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("error reading file %s: %v", filePath, err)
+	}
+
+	contentStr := string(fileContent)
+	prefixToRemove := "Encrypted Secret (Base64 encoded):"
+
+	// Check and remove the specified prefix if present
+	if prefixToRemove != "" && strings.HasPrefix(contentStr, prefixToRemove) {
+		contentStr = strings.TrimPrefix(contentStr, prefixToRemove)
+		contentStr = strings.ReplaceAll(contentStr, "\n", "")
+		contentStr = strings.ReplaceAll(contentStr, "\r", "")
+		contentStr = strings.TrimSpace(contentStr)
+	}
+
+	return contentStr, nil
+}
+
+// Function to create the JSON structure and save to disk
+func saveCertInfoToJSON(commonName, publicKeyPath, privateKeyPath, outputPath string) error {
+	name := cleanCommonName(commonName)
+
+	publicKeyBase64, err := encodeFileToBase64(publicKeyPath)
+	if err != nil {
+		return err
+	}
+	// Assuming privateKey is already in Base64 format but needs cleaning
+	privateKeyContent, err := readFileAndClean(privateKeyPath)
+	if err != nil {
+		return err
+	}
+
+	disableOcspStaplingRaw := json.RawMessage([]byte("{}"))
+
+	certInfo := CertInfo{
+		Metadata: Metadata{
+			Name:      name,
+			Namespace: "shared",
+		},
+		Spec: Spec{
+			DisableOcspStapling: disableOcspStaplingRaw,
+			CertificateURL:      "string:///" + publicKeyBase64,
+			PrivateKey: PrivateKey{
+				BlindfoldSecretInfo: SecretInfo{
+					Location: "string:///" + privateKeyContent,
+				},
+			},
+		},
+	}
+
+	jsonData, err := json.MarshalIndent(certInfo, "", "    ")
+	if err != nil {
+		return fmt.Errorf("error marshalling JSON: %v", err)
+	}
+
+	if err := os.WriteFile(outputPath, jsonData, 0644); err != nil {
+		return fmt.Errorf("error writing JSON to file: %v", err)
+	}
+
+	fmt.Println("Certificate information saved to", outputPath)
+	return nil
+}
+
+// runShellCommand executes the 'vesctl' command with provided arguments.
+func runShellCommand(command, outputFilePath string) error {
+	// Open the output file
+	outputFile, err := os.Create(outputFilePath)
+	if err != nil {
+		return fmt.Errorf("error creating output file: %v", err)
+	}
+	defer outputFile.Close()
+
+	// Execute the command using 'bash -c'
+	cmd := exec.Command("bash", "-c", command)
+	cmd.Stdout = outputFile // Redirect stdout to the file
+	cmd.Stderr = os.Stderr  // Redirect stderr to see errors in the console
+
+	// Run the command
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("error executing command: %v", err)
+	}
+
+	return nil
+}
+
 func main() {
 	client := &http.Client{}
 
@@ -252,7 +390,7 @@ func main() {
 	// Cert Values
 	commonName := os.Getenv("VEN_COMMON_NAME")
 
-	dir := filepath.Join("/certs/", commonName) // Adjust path as needed
+	dir := filepath.Join("./certs/", commonName) // Adjust path as needed
 
 	certPath := filepath.Join(dir, "/certs/", commonName+".pem")
 	keyPath := filepath.Join(dir, "/key/", "private.key")
@@ -262,6 +400,22 @@ func main() {
 		fmt.Println("One or more required environment variables are not set.")
 		return
 	}
+
+	// Use vesctl to download Tenant Public Key
+	err := runShellCommand("vesctl request secrets get-public-key", "xc-api-pubkey")
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	fmt.Println("Command executed successfully, output saved to xc-api-pubkey")
+
+	// Use vesctl to download Tenant Secret Policy
+	err = runShellCommand("vesctl request secrets get-policy-document --namespace shared --name ves-io-allow-volterra", "xc-api-policy")
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	fmt.Println("Command executed successfully, output saved to xc-api-policy")
 
 	if fileExists(certPath) && fileExists(keyPath) {
 		expiresSoon, err := certExpiresSoon(certPath)
@@ -300,8 +454,6 @@ func main() {
 			return
 		}
 
-		//fmt.Println(string(jsonData))
-
 		// Creating the request // comment out to test CSR
 		req, err := http.NewRequest("POST", apiUrl+"/outagedetection/v1/certificaterequests", bytes.NewBuffer(jsonData))
 		if err != nil {
@@ -322,13 +474,11 @@ func main() {
 		defer resp.Body.Close()
 
 		// Process the response
-		body, err := ioutil.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-
-		//fmt.Println(string(body))
 
 		var certResponse CSRResponse
 		err = json.Unmarshal(body, &certResponse) // Note: No need to convert body to []byte, it's already a byte slice
@@ -357,6 +507,34 @@ func main() {
 
 		if successfulDownloads > 0 {
 			fmt.Printf("Operation successful, %d certificates downloaded.\n", successfulDownloads)
+			// Create blindfold encoded private key
+
+			// Use vesctl to blindfold private key
+			blindfoldKeyPath := filepath.Join(dir + "/blindfold-key")
+			err = runShellCommand("vesctl request secrets encrypt --policy-document xc-api-policy --public-key xc-api-pubkey "+keyPath, blindfoldKeyPath)
+			if err != nil {
+				fmt.Println("Error:", err)
+				return
+			}
+			fmt.Println("Command executed successfully, output saved to xc-api-policy")
+
+			// Create JSON for Cert Creation
+			jsonOutputPath := filepath.Join(dir+"/certs/", commonName+".json")
+
+			if err := saveCertInfoToJSON(commonName, certPath, blindfoldKeyPath, jsonOutputPath); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+
+			// Create Certificate with vesctl
+			creationLog := filepath.Join(dir, commonName+".yaml")
+			err = runShellCommand("vesctl cfg create certificate -i "+jsonOutputPath, creationLog)
+			if err != nil {
+				fmt.Println("Error:", err)
+				return
+			}
+			fmt.Println("Command executed successfully, certificate created on tenant.")
+
 		} else {
 			fmt.Println("Operation failed, no certificates were downloaded.")
 		}

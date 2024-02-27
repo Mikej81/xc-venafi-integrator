@@ -27,4 +27,8 @@ prep_env.sh
 *.crt
 *.cer
 
+xc-api-pubkey
+xc-api-policy
+blindfold-key
+
 my*.*
