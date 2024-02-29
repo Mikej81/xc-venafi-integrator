@@ -12,14 +12,39 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// Structure for the search payload
+type VenafiSearchPayload struct {
+	Expression struct {
+		Operator string                   `json:"operator"`
+		Operands []map[string]interface{} `json:"operands"`
+	} `json:"expression"`
+	Ordering struct {
+		Orders []map[string]string `json:"orders"`
+	} `json:"ordering"`
+	Paging struct {
+		PageNumber int `json:"pageNumber"`
+		PageSize   int `json:"pageSize"`
+	} `json:"paging"`
+}
+
+type VenafiSearchResponse struct {
+	Count        int `json:"count"`
+	Certificates []struct {
+		Id             string   `json:"id"`
+		ApplicationIds []string `json:"applicationIds"`
+	} `json:"certificates"`
+}
 
 type venCSR struct {
 	CertificateSigningRequest    string `json:"certificateSigningRequest"`
@@ -245,25 +270,131 @@ func renewCertificate(apiURL, apiKey, certPath, keyPath string) error {
 	return nil
 }
 
-func certExpiresSoon(certPath string) (bool, error) {
-	certPEM, err := os.ReadFile(certPath)
+// May use venafi API instead of checking cert value, will have to see what is involved
+// func certExpiresSoon(certPath string) (bool, error) {
+// 	certPEM, err := os.ReadFile(certPath)
+// 	if err != nil {
+// 		return false, err
+// 	}
+
+// 	block, _ := pem.Decode(certPEM)
+// 	if block == nil {
+// 		return false, fmt.Errorf("failed to parse PEM block containing the certificate")
+// 	}
+
+// 	cert, err := x509.ParseCertificate(block.Bytes)
+// 	if err != nil {
+// 		return false, err
+// 	}
+
+// 	// Check if the certificate expires within the next 7 days
+// 	expiresSoon := cert.NotAfter.Sub(time.Now()).Hours() < (7 * 24)
+// 	return expiresSoon, nil
+// }
+
+func queryVenafiAPIForRenewal(commonName string) ([]string, string, error) {
+	apiKey := os.Getenv("VEN_API_KEY")
+	renewWindowDays := os.Getenv("RENEW_WINDOW_DAYS")
+
+	// Prepare the payload
+	payload := VenafiSearchPayload{
+		Expression: struct {
+			Operator string                   `json:"operator"`
+			Operands []map[string]interface{} `json:"operands"`
+		}{
+			Operator: "AND",
+			Operands: []map[string]interface{}{
+				{
+					"field":    "validityEnd",
+					"operator": "GTE",
+					"value":    time.Now().Format(time.RFC3339),
+				},
+				{
+					"field":    "validityEnd",
+					"operator": "LTE",
+					"value":    time.Now().AddDate(0, 0, stringToInt(renewWindowDays)).Format(time.RFC3339),
+				},
+				{
+					"field":    "certificateStatus",
+					"operator": "EQ",
+					"value":    "ACTIVE",
+				},
+				{
+					"field":    "certificateName",
+					"operator": "EQ",
+					"value":    commonName,
+				},
+			},
+		},
+		Ordering: struct {
+			Orders []map[string]string `json:"orders"`
+		}{
+			Orders: []map[string]string{
+				{
+					"direction": "DESC",
+					"field":     "certificatInstanceModificationDate",
+				},
+			},
+		},
+		Paging: struct {
+			PageNumber int `json:"pageNumber"`
+			PageSize   int `json:"pageSize"`
+		}{
+			PageNumber: 0,
+			PageSize:   10,
+		},
+	}
+
+	// Marshal the payload to JSON
+	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return false, err
+		return nil, "", fmt.Errorf("error marshaling search payload: %v", err)
 	}
 
-	block, _ := pem.Decode(certPEM)
-	if block == nil {
-		return false, fmt.Errorf("failed to parse PEM block containing the certificate")
-	}
-
-	cert, err := x509.ParseCertificate(block.Bytes)
+	// Create and execute the HTTP request
+	client := &http.Client{}
+	req, err := http.NewRequest("POST", "https://api.venafi.cloud/outagedetection/v1/certificatesearch", bytes.NewBuffer(payloadBytes))
 	if err != nil {
-		return false, err
+		return nil, "", fmt.Errorf("error creating request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("tppl-api-key", apiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("error making request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read and unmarshal the response
+	var searchResp VenafiSearchResponse
+	respBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("error reading response body: %v", err)
 	}
 
-	// Check if the certificate expires within the next 7 days
-	expiresSoon := cert.NotAfter.Sub(time.Now()).Hours() < (7 * 24)
-	return expiresSoon, nil
+	err = json.Unmarshal(respBytes, &searchResp)
+	if err != nil {
+		return nil, "", fmt.Errorf("error unmarshaling response: %v", err)
+	}
+
+	// Check if there are results
+	if searchResp.Count == 0 {
+		// Certificate does not require renewal
+		return nil, "", nil
+	}
+
+	// Return the applicationIds and certificateId from the first certificate in the response
+	return searchResp.Certificates[0].ApplicationIds, searchResp.Certificates[0].Id, nil
+}
+
+// stringToInt converts a string to an int, returns 0 on error
+func stringToInt(s string) int {
+	i, err := strconv.Atoi(s)
+	if err != nil {
+		return 0
+	}
+	return i
 }
 
 // fileExists checks if a file exists at the given file path.
@@ -420,6 +551,7 @@ func main() {
 	}
 	fmt.Println("Command executed successfully, output saved to xc-api-policy")
 
+	// need to change fileexists and expiresoon to use API function
 	if fileExists(certPath) && fileExists(keyPath) {
 		expiresSoon, err := certExpiresSoon(certPath)
 		if err != nil {

@@ -1,4 +1,4 @@
-# F5XC Blindfold Venafi Integrator
+# F5XC Blindfold Venafi Integrator (Proof of Concept)
 
 Solution to integrate Venafi CA into XC via vesctl / blindfold.
 

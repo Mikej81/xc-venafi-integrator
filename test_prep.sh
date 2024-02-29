@@ -10,6 +10,7 @@ export VEN_LOCALITY=""
 export VEN_STATE=""
 export VEN_COUNTRY=""
 export VEN_DNS_NAMES=""
+export RENEW_WINDOW_DAYS=
 
 export XC_API_URL=
 export XC_API_KEY=
