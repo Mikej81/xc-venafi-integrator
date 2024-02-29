@@ -12,7 +12,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
@@ -368,7 +367,7 @@ func queryVenafiAPIForRenewal(commonName string) ([]string, string, error) {
 
 	// Read and unmarshal the response
 	var searchResp VenafiSearchResponse
-	respBytes, err := ioutil.ReadAll(resp.Body)
+	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, "", fmt.Errorf("error reading response body: %v", err)
 	}
